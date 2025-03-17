@@ -1,0 +1,73 @@
+.data
+    prompt: .asciiz "Ingrese un numero decimal o hexadecimal: "
+    error_message: .asciiz "Entrada no valida\n"
+    input_buffer: .space 256
+    output_buffer: .space 34 # 1 + 8 + 23 + 2 espacios + null
+.text
+    .globl main
+main:
+    # Bucle principal
+input_loop:
+    # Mostrar el prompt (syscall 4)
+    li $v0, 4
+    la $a0, prompt
+    syscall
+
+    # Leer la entrada del usuario (syscall 8)
+    li $v0, 8
+    la $a0, input_buffer
+    li $a1, 256
+    syscall
+
+    # Filtrar la entrada (implementacion simplificada)
+    jal filter_input
+    beqz $v0, input_loop # Si la entrada no es valida, repetir
+
+    # Convertir a binario
+    la $a0, input_buffer
+    jal convert_to_binary
+
+    # Convertir entero binario a punto flotante (simplificado)
+    mtc1 $v0, $f12 # Mover el entero a un registro de punto flotante
+    cvt.s.w $f12, $f12 # Convertir el entero a punto flotante de precisión simple
+
+    # Convertir a punto flotante IEEE 754
+    jal float_to_ieee754
+
+    # Formatear la salida
+    jal format_output
+
+    # Mostrar la salida (syscall 4)
+    li $v0, 4
+    la $a0, output_buffer
+    syscall
+
+    # Terminar el programa
+    li $v0, 10
+    syscall
+
+# Funciones (implementacion parcial)
+filter_input:
+    # Implementar la logica de filtrado aqui
+    # ...
+    # Si la entrada es valida, poner 1 en $v0, si no, poner 0
+    li $v0, 1
+    jr $ra
+
+convert_to_binary:
+    # Implementar la logica de conversion a binario aqui
+    # ...
+    # Poner el valor binario en $v0
+    li $v0, 10 # Ejemplo
+    jr $ra
+
+float_to_ieee754:
+    # Implementar la logica de conversion a punto flotante aqui
+    # ...
+    # Poner la representacion IEEE 754 en output_buffer
+    jr $ra
+
+format_output:
+    # Implementar el formateo de la salida aqui
+    # ...
+    jr $ra
