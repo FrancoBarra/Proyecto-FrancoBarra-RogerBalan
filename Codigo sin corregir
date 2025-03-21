@@ -1,0 +1,296 @@
+.data
+    prompt: .asciiz "Ingrese un numero decimal o hexadecimal: "
+    error_message: .asciiz "Entrada no valida\n"
+    input_buffer: .space 256
+    output_buffer: .space 34 # 1 + 8 + 23 + 2 espacios + null
+
+.text
+    .globl main
+main:
+    # Bucle principal
+input_loop:
+    # Mostrar el prompt (syscall 4)
+    li $v0, 4
+    la $a0, prompt
+    syscall
+
+    # Leer la entrada del usuario (syscall 8)
+    li $v0, 8
+    la $a0, input_buffer
+    li $a1, 256
+    syscall
+
+    # Filtrar la entrada (implementacion simplificada)
+    jal filter_input
+    beqz $v0, input_loop # Si la entrada no es valida, repetir
+
+    # Convertir a binario
+    la $a0, input_buffer
+    jal convert_to_binary
+
+    # Convertir entero binario a punto flotante (simplificado)
+    mtc1 $v0, $f12 # Mover el entero a un registro de punto flotante
+    cvt.s.w $f12, $f12 # Convertir el entero a punto flotante de precisi�n simple
+
+    # Convertir a punto flotante IEEE 754
+    jal float_to_ieee754
+
+    # Formatear la salida
+    jal format_output
+
+    # Mostrar la salida (syscall 4)
+    li $v0, 4
+    la $a0, output_buffer
+    syscall
+
+    # Terminar el programa
+    li $v0, 10
+    syscall
+
+# Funciones (implementacion parcial)
+filter_input:
+    # $a0 contiene la dirección del buffer de entrada
+    lb $t0, ($a0) # Carga el primer byte de la entrada
+
+    # Verifica si es un número decimal
+    li $t1, '0'
+    blt $t0, $t1, invalid_input # Si es menor que '0', inválido
+    li $t1, '9'
+    bgt $t0, $t1, check_hex # Si es mayor que '9', verifica si es hexadecimal
+
+    # Es un número decimal válido
+    li $v0, 1
+    jr $ra
+
+check_hex:
+    # Verifica si es '0x' (hexadecimal)
+    lb $t1, 1($a0)
+    li $t2, 'x'
+    bne $t1, $t2, invalid_input # Si no es 'x', inválido
+
+    # Es un número hexadecimal, puedes agregar más validación aquí si es necesario
+    li $v0, 1
+    jr $ra
+
+invalid_input:
+    # Entrada inválida
+    li $v0, 0
+    jr $ra
+    li $v0, 1
+
+convert_to_binary:
+    # Implementar la logica de conversion a binario aqui
+    # $a0 contiene la dirección del buffer de entrada
+    # La salida se almacenará en $v0
+
+    # Verifica si es hexadecimal (empieza con "0x")
+    lb $t0, ($a0)
+    li $t1, '0'
+    beq $t0, $t1, check_x # Si el primer caracter es cero, revisa si es hexadecimal.
+
+    # Es decimal
+    jal convert_decimal
+    jr $ra
+
+check_x:
+    lb $t1, 1($a0)
+    li $t2, 'x'
+    bne $t1, $t2, convert_decimal # Si no es 'x', es decimal
+
+    # Es hexadecimal
+    la $a0, 2($a0) # Salta "0x"
+    jal convert_hexadecimal
+    jr $ra
+
+convert_decimal:
+    li $v0, 0 # Inicializa el resultado
+    li $t0, 10 # Base decimal
+loop_decimal:
+    lb $t1, ($a0)
+    beq $t1, 0, end_decimal # Fin de la cadena
+    li $t2, '0'
+    blt $t1, $t2, end_decimal # Si no es un dígito, termina
+    li $t3, '9'
+    bgt $t1, $t3, end_decimal # Si no es un dígito, termina
+    sub $t1, $t1, $t2 # Convierte ASCII a valor numérico
+    mult $v0, $t0
+    mflo $v0 # $v0 = $v0 * 10
+    add $v0, $v0, $t1 # $v0 = $v0 + dígito
+    addi $a0, $a0, 1 # Siguiente caracter
+    j loop_decimal
+end_decimal:
+    jr $ra
+
+convert_hexadecimal:
+    li $v0, 0 # Inicializa el resultado
+loop_hex:
+    lb $t1, ($a0)
+    beq $t1, 0, end_hex # Fin de la cadena
+    li $t2, '0'
+    blt $t1, $t2, check_alpha # Si es menor que '0', verifica si es A-F
+    li $t3, '9'
+    ble $t1, $t3, convert_digit # Si es <= '9', es un dígito
+check_alpha:
+    li $t2, 'a'
+    blt $t1, $t2, check_upper # Si es menor que 'a', verifica si es A-F
+    li $t3, 'f'
+    ble $t1, $t3, convert_alpha # Si es <= 'f', es a-f
+check_upper:
+    li $t2, 'A'
+    blt $t1, $t2, end_hex # Si es menor que 'A', termina
+    li $t3, 'F'
+    bgt $t1, $t3, end_hex # Si es mayor que 'F', termina
+convert_alpha:
+    addi $t1, $t1, -87 # Convierte a-f o A-F a 10-15
+    j shift_and_add
+convert_digit:
+    sub $t1, $t1, 48 # Convierte '0'-'9' a 0-9
+shift_and_add:
+    sll $v0, $v0, 4 # $v0 = $v0 * 16
+    add $v0, $v0, $t1 # $v0 = $v0 + dígito/letra
+    addi $a0, $a0, 1 # Siguiente caracter
+    j loop_hex
+end_hex:
+    jr $ra
+    # Poner el valor binario en $v0
+    li $v0, 10 # Ejemplo
+    
+float_to_ieee754:
+    # $f12 contiene el número de punto flotante
+    # $a0 apunta al output_buffer
+
+    # Extraer el signo
+    mov.s $f0, $f12
+    li.s $f1, 0.0
+    c.lt.s $f0, $f1
+    bc1t sign_is_negative
+    li $t0, 0 # Signo positivo
+    j extract_exponent
+sign_is_negative:
+    li $t0, 1 # Signo negativo
+    neg.s $f12, $f12 # Hacer el número positivo
+
+extract_exponent:
+    # Normalizar y extraer el exponente
+    li.s $f1, 2.0
+    li $t1, 0 # Exponente
+loop_normalize:
+    mov.s $f0, $f12
+    li.s $f2, 1.0
+    c.lt.s $f0, $f2
+    bc1t normalize_divide
+    div.s $f12, $f12, $f1
+    addi $t1, $t1, 1
+    j loop_normalize
+normalize_divide:
+    mul.s $f12, $f12, $f1
+    subi $t1, $t1, 1
+
+    # Calcular el exponente sesgado
+    addi $t1, $t1, 127 # Sesgo de 127 para punto flotante de precisión simple
+
+extract_mantissa:
+    # Extraer la mantisa
+    li $t2, 23 # 23 bits de mantisa
+    li $t3, 0 # Mantisa
+loop_mantissa:
+    beqz $t2, store_ieee754
+    mul.s $f12, $f12, $f1
+    mfc1 $t4, $f12
+    andi $t4, $t4, 1 # Bit menos significativo
+    sll $t4, $t4, $t2
+    or $t3, $t3, $t4
+    subi $t2, $t2, 1
+    sub.s $f12, $f12, $t4
+    j loop_mantissa
+
+store_ieee754:
+    # Almacenar en output_buffer
+    sb $t0, ($a0) # Signo
+    addi $a0, $a0, 1
+    li $t5, 8 # 8 bits de exponente
+    li $t6, 7 # Máscara para bits del exponente
+loop_exponent:
+    beqz $t5, store_mantissa
+    andi $t7, $t1, $t6
+    srl $t7, $t7, 7
+    add $t7, $t7, 48 # Convertir a ASCII
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sll $t1, $t1, 1
+    subi $t5, $t5, 1
+    j loop_exponent
+
+store_mantissa:
+    li $t5, 23 # 23 bits de mantisa
+    li $t6, 22 # Máscara para bits de la mantisa
+loop_mantissa_store:
+    beqz $t5, end_ieee754
+    andi $t7, $t3, $t6
+    srl $t7, $t7, 22
+    add $t7, $t7, 48 # Convertir a ASCII
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sll $t3, $t3, 1
+    subi $t5, $t5, 1
+    j loop_mantissa_store
+
+end_ieee754:
+    li $t7, 32 # Espacio
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    li $t7, 0 # Null-terminator
+    sb $t7, ($a0)
+    jr $ra
+    # Poner la representacion IEEE 754 en output_buffer
+
+format_output:
+    # Implementar el formateo de la salida aqui
+    # $a0 apunta al output_buffer
+    # La salida formateada se almacena en el mismo buffer
+
+    # Mostrar el signo
+    lb $t0, ($a0) # Cargar el signo
+    li $t1, '0'
+    beq $t0, 0, print_zero
+    li $t1, '1'
+print_zero:
+    sb $t1, ($a0) # Almacenar el signo como '0' o '1'
+    addi $a0, $a0, 1
+
+    # Mostrar el exponente
+    li $t2, 8 # 8 bits del exponente
+loop_exponent_print:
+    beqz $t2, print_space1
+    lb $t3, ($a0)
+    sb $t3, ($a0)
+    addi $a0, $a0, 1
+    subi $t2, $t2, 1
+    j loop_exponent_print
+
+print_space1:
+    li $t4, 32 # Espacio ASCII
+    sb $t4, ($a0)
+    addi $a0, $a0, 1
+
+    # Mostrar la mantisa
+    li $t5, 23 # 23 bits de la mantisa
+loop_mantissa_print:
+    beqz $t5, print_space2
+    lb $t6, ($a0)
+    sb $t6, ($a0)
+    addi $a0, $a0, 1
+    subi $t5, $t5, 1
+    j loop_mantissa_print
+
+print_space2:
+    li $t4, 32 # Espacio ASCII
+    sb $t4, ($a0)
+    addi $a0, $a0, 1
+
+    # Agregar el terminador nulo
+    li $t7, 0
+    sb $t7, ($a0)
+    jr $ra
