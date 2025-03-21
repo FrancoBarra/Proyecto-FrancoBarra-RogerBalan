@@ -1,0 +1,189 @@
+.data
+    prompt: .asciiz "Ingrese un numero decimal o hexadecimal: "
+    error_message: .asciiz "Entrada no valida\n"
+    input_buffer: .space 256
+    output_buffer: .space 34 # 1 + 8 + 23 + 2 espacios + null
+    float_zero: .float 0.0
+    float_one: .float 1.0
+    float_two: .float 2.0
+
+.text
+    .globl main
+main:
+input_loop:
+    # Mostrar el prompt (syscall 4)
+    li $v0, 4
+    la $a0, prompt
+    syscall
+
+    # Leer la entrada del usuario (syscall 8)
+    li $v0, 8
+    la $a0, input_buffer
+    li $a1, 256
+    syscall
+
+    # Filtrar la entrada
+    jal filter_input
+    beqz $v0, input_loop # Si la entrada no es valida, repetir
+
+    # Convertir a binario
+    la $a0, input_buffer
+    jal convert_to_binary
+
+    # Convertir entero binario a punto flotante
+    mtc1 $v0, $f12
+    cvt.s.w $f12, $f12
+
+    # Convertir a punto flotante IEEE 754
+    jal float_to_ieee754
+
+    # Formatear la salida
+    jal format_output
+
+    # Mostrar la salida (syscall 4)
+    li $v0, 4
+    la $a0, output_buffer
+    syscall
+
+    # Terminar el programa
+    li $v0, 10
+    syscall
+
+# Funciones
+filter_input:
+    # (Código filter_input aquí)
+    lb $t0, ($a0)
+    li $t1, '0'
+    blt $t0, $t1, invalid_input
+    li $t1, '9'
+    bgt $t0, $t1, check_hex
+    li $v0, 1
+    jr $ra
+check_hex:
+    lb $t1, 1($a0)
+    li $t2, 'x'
+    bne $t1, $t2, invalid_input
+    li $v0, 1
+    jr $ra
+invalid_input:
+    li $v0, 0
+    jr $ra
+
+convert_to_binary:
+    # (Código convert_to_binary aquí)
+    lb $t0, ($a0)
+    li $t1, '0'
+    beq $t0, $t1, check_x
+    jal convert_decimal
+    jr $ra
+check_x:
+    lb $t1, 1($a0)
+    li $t2, 'x'
+    bne $t1, $t2, convert_decimal
+    la $a0, 2($a0)
+    jal convert_hexadecimal
+    jr $ra
+convert_decimal:
+    li $v0, 0
+    li $t0, 10
+loop_decimal:
+    lb $t1, ($a0)
+    beq $t1, 0, end_decimal
+    li $t2, '0'
+    blt $t1, $t2, end_decimal
+    li $t3, '9'
+    bgt $t1, $t3, end_decimal
+    sub $t1, $t1, $t2
+    mult $v0, $t0
+    mflo $v0
+    add $v0, $v0, $t1
+    addi $a0, $a0, 1
+    j loop_decimal
+end_decimal:
+    jr $ra
+convert_hexadecimal:
+    li $v0, 0
+loop_hex:
+    lb $t1, ($a0)
+    beq $t1, 0, end_hex
+    li $t2, '0'
+    blt $t1, $t2, check_alpha
+    li $t3, '9'
+    ble $t1, $t3, convert_digit
+check_alpha:
+    li $t2, 'a'
+    blt $t1, $t2, check_upper
+    li $t3, 'f'
+    ble $t1, $t3, convert_alpha
+check_upper:
+    li $t2, 'A'
+    blt $t1, $t2, end_hex
+    li $t3, 'F'
+    bgt $t1, $t3, end_hex
+convert_alpha:
+    addi $t1, $t1, -87
+    j shift_and_add
+convert_digit:
+    sub $t1, $t1, 48
+shift_and_add:
+    sll $v0, $v0, 4
+    add $v0, $v0, $t1
+    addi $a0, $a0, 1
+    j loop_hex
+end_hex:
+    jr $ra
+
+float_to_ieee754:
+    # $f12 contiene el valor de punto flotante
+    # $a0 apunta al buffer de salida
+
+    # Obtener el signo
+    mov.s $f0, $f12
+    l.s $f1, float_zero
+    c.lt.s $f0, $f1
+    bc1t sign_is_negative
+    li $t0, 0 # Signo positivo
+    j extract_exponent
+sign_is_negative:
+    li $t0, 1 # Signo negativo
+    neg.s $f12, $f12
+
+extract_exponent:
+    l.s $f1, float_two
+    li $t1, 0
+loop_normalize:
+    mov.s $f0, $f12
+    l.s $f2, float_one
+    c.lt.s $f0, $f2
+    bc1t normalize_divide
+    div.s $f12, $f12, $f1
+    addi $t1, $t1, 1
+    j loop_normalize
+normalize_divide:
+    mul.s $f12, $f12, $f1
+    subi $t1, $t1, 1
+    addi $t1, $t1, 127 # Bias del exponente
+
+extract_mantissa:
+    li $t2, 23 # Inicializa el contador de la mantisa
+    li $t3, 0
+loop_mantissa:
+    beqz $t2, store_ieee754
+    mul.s $f12, $f12, $f1
+    mfc1 $t4, $f12
+    andi $t4, $t4, 1
+    sllv $t4, $t4, $t2
+    or $t3, $t3, $t4
+    subi $t2, $t2, 1
+    mtc1 $t4, $f4
+    cvt.s.w $f4, $f4
+    sub.s $f12, $f12, $f4
+    j loop_mantissa
+    
+store_ieee754:
+    sll $t0, $t0, 31 # Signo en el bit 31
+    sll $t1, $t1, 23 # Exponente en los bits 23-30
+    or $t0, $t0, $t1
+    or $t0, $t0, $t3 # Mantisa en los bits 0-22
+    sw $t0, ($a0) # Almacenar el resultado de 32 bits
+    jr $ra
