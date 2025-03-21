@@ -1,0 +1,93 @@
+.data
+    output_buffer: .space 34 # 1 (signo) + 8 (exponente) + 23 (mantisa) + 2 (espacios) + null
+
+.text
+float_to_ieee754:
+    # $f12 contiene el número de punto flotante
+    # $a0 apunta al output_buffer
+
+    # Extraer el signo
+    mov.s $f0, $f12
+    li.s $f1, 0.0
+    c.lt.s $f0, $f1
+    bc1t sign_is_negative
+    li $t0, 0 # Signo positivo
+    j extract_exponent
+sign_is_negative:
+    li $t0, 1 # Signo negativo
+    neg.s $f12, $f12 # Hacer el número positivo
+
+extract_exponent:
+    # Normalizar y extraer el exponente
+    li.s $f1, 2.0
+    li $t1, 0 # Exponente
+loop_normalize:
+    mov.s $f0, $f12
+    li.s $f2, 1.0
+    c.lt.s $f0, $f2
+    bc1t normalize_divide
+    div.s $f12, $f12, $f1
+    addi $t1, $t1, 1
+    j loop_normalize
+normalize_divide:
+    mul.s $f12, $f12, $f1
+    subi $t1, $t1, 1
+
+    # Calcular el exponente sesgado
+    addi $t1, $t1, 127 # Sesgo de 127 para punto flotante de precisión simple
+
+extract_mantissa:
+    # Extraer la mantisa
+    li $t2, 23 # 23 bits de mantisa
+    li $t3, 0 # Mantisa
+loop_mantissa:
+    beqz $t2, store_ieee754
+    mul.s $f12, $f12, $f1
+    mfc1 $t4, $f12
+    andi $t4, $t4, 1 # Bit menos significativo
+    sll $t4, $t4, $t2
+    or $t3, $t3, $t4
+    subi $t2, $t2, 1
+    sub.s $f12, $f12, $t4
+    j loop_mantissa
+
+store_ieee754:
+    # Almacenar en output_buffer
+    sb $t0, ($a0) # Signo
+    addi $a0, $a0, 1
+    li $t5, 8 # 8 bits de exponente
+    li $t6, 7 # Máscara para bits del exponente
+loop_exponent:
+    beqz $t5, store_mantissa
+    andi $t7, $t1, $t6
+    srl $t7, $t7, 7
+    add $t7, $t7, 48 # Convertir a ASCII
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sll $t1, $t1, 1
+    subi $t5, $t5, 1
+    j loop_exponent
+
+store_mantissa:
+    li $t5, 23 # 23 bits de mantisa
+    li $t6, 22 # Máscara para bits de la mantisa
+loop_mantissa_store:
+    beqz $t5, end_ieee754
+    andi $t7, $t3, $t6
+    srl $t7, $t7, 22
+    add $t7, $t7, 48 # Convertir a ASCII
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sll $t3, $t3, 1
+    subi $t5, $t5, 1
+    j loop_mantissa_store
+
+end_ieee754:
+    li $t7, 32 # Espacio
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    sb $t7, ($a0)
+    addi $a0, $a0, 1
+    li $t7, 0 # Null-terminator
+    sb $t7, ($a0)
+    jr $ra
