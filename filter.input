@@ -1,0 +1,32 @@
+.data
+    error_message: .asciiz "Entrada no valida\n"
+
+.text
+filter_input:
+    # $a0 contiene la dirección del buffer de entrada
+    lb $t0, ($a0) # Carga el primer byte de la entrada
+
+    # Verifica si es un número decimal
+    li $t1, '0'
+    blt $t0, $t1, invalid_input # Si es menor que '0', inválido
+    li $t1, '9'
+    bgt $t0, $t1, check_hex # Si es mayor que '9', verifica si es hexadecimal
+
+    # Es un número decimal válido
+    li $v0, 1
+    jr $ra
+
+check_hex:
+    # Verifica si es '0x' (hexadecimal)
+    lb $t1, 1($a0)
+    li $t2, 'x'
+    bne $t1, $t2, invalid_input # Si no es 'x', inválido
+
+    # Es un número hexadecimal, puedes agregar más validación aquí si es necesario
+    li $v0, 1
+    jr $ra
+
+invalid_input:
+    # Entrada inválida
+    li $v0, 0
+    jr $ra
