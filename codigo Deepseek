@@ -1,0 +1,193 @@
+.data
+    prompt:         .asciiz "Introduce un numero en formato decimal o hexadecimal: "
+    invalid_input:  .asciiz "Entrada no válida.\n"
+    normalized_msg: .asciiz "Número normalizado: "
+    sign_msg:       .asciiz "Signo: "
+    exponent_msg:   .asciiz "Exponente: "
+    mantissa_msg:   .asciiz "Mantisa: "
+    newline:        .asciiz "\n"
+    buffer:         .space 32
+    sign:           .byte 0
+    exponent:       .byte 0
+    mantissa:       .word 0
+
+.text
+.globl main
+
+main:
+    # Mostrar el mensaje de bienvenida
+    li $v0, 4
+    la $a0, prompt
+    syscall
+
+    # Leer la entrada del usuario
+    li $v0, 8
+    la $a0, buffer
+    li $a1, 32
+    syscall
+
+    # Procesar la entrada
+    jal process_input
+
+    # Verificar si la entrada es válida
+    beq $v0, $zero, invalid_input_error
+
+    # Normalizar el número
+    jal normalize_number
+
+    # Mostrar la representación final
+    jal display_representation
+
+    # Salir del programa
+    li $v0, 10
+    syscall
+
+invalid_input_error:
+    # Mostrar mensaje de error
+    li $v0, 4
+    la $a0, invalid_input
+    syscall
+
+    # Salir del programa
+    li $v0, 10
+    syscall
+
+process_input:
+    # Inicializar registros
+    la $t0, buffer          # Cargar la dirección del búfer
+    li $t1, 0               # Inicializar el signo (0 = positivo, 1 = negativo)
+    li $t2, 0               # Inicializar la parte entera
+    li $t3, 0               # Inicializar la parte fraccionaria
+    li $t4, 10              # Base decimal
+    li $t5, 0               # Contador de dígitos fraccionarios
+    li $t8, 0               # Bandera para indicar si se encontró un punto decimal
+
+    # Leer el primer carácter
+    lb $t6, 0($t0)
+    beq $t6, '+', positive  # Si es '+', es positivo
+    beq $t6, '-', negative  # Si es '-', es negativo
+    j check_digit           # Si no hay signo, verificar si es un dígito
+
+positive:
+    addi $t0, $t0, 1        # Saltar el signo '+'
+    j check_digit
+
+negative:
+    li $t1, 1               # Establecer el signo como negativo
+    addi $t0, $t0, 1        # Saltar el signo '-'
+
+check_digit:
+    lb $t6, 0($t0)
+    beq $t6, '.', found_dot  # Si encuentra '.', procesar la parte fraccionaria
+    beq $t6, 0, end_process  # Si es el final de la cadena, terminar
+    beq $t6, 10, end_process # Si es un salto de línea, terminar
+    blt $t6, '0', invalid_input_error  # Si no es un dígito, error
+    bgt $t6, '9', invalid_input_error
+
+    # Convertir dígito a valor y acumular
+    mul $t2, $t2, $t4       # Multiplicar la parte entera por 10
+    sub $t7, $t6, '0'       # Convertir dígito a valor
+    add $t2, $t2, $t7       # Acumular en la parte entera
+    addi $t0, $t0, 1        # Mover al siguiente carácter
+    j check_digit
+
+found_dot:
+    addi $t0, $t0, 1        # Saltar el punto '.'
+    li $t8, 1               # Indicar que se encontró un punto decimal
+
+process_fraction_loop:
+    lb $t6, 0($t0)
+    beq $t6, 0, end_process  # Si es el final de la cadena, terminar
+    beq $t6, 10, end_process # Si es un salto de línea, terminar
+    blt $t6, '0', invalid_input_error  # Si no es un dígito, error
+    bgt $t6, '9', invalid_input_error
+
+    # Convertir dígito a valor y acumular
+    mul $t3, $t3, $t4       # Multiplicar la parte fraccionaria por 10
+    sub $t7, $t6, '0'       # Convertir dígito a valor
+    add $t3, $t3, $t7       # Acumular en la parte fraccionaria
+    addi $t5, $t5, 1        # Incrementar el contador de dígitos fraccionarios
+    addi $t0, $t0, 1        # Mover al siguiente carácter
+    j process_fraction_loop
+
+end_process:
+    # Guardar el signo, parte entera y fraccionaria
+    sb $t1, sign
+    sw $t2, mantissa        # Usar mantissa como almacenamiento temporal
+    sw $t3, mantissa + 4    # Guardar la parte fraccionaria
+
+    # Retornar éxito
+    li $v0, 1
+    jr $ra
+    
+normalize_number:
+    # Cargar la parte entera y fraccionaria
+    lw $t0, mantissa        # Parte entera
+    lw $t1, mantissa + 4    # Parte fraccionaria
+
+    # Combinar parte entera y fraccionaria en un solo número
+    li $t2, 100             # Factor para convertir la parte fraccionaria
+    mul $t1, $t1, $t2       # Multiplicar la parte fraccionaria por 100
+    add $t0, $t0, $t1       # Combinar parte entera y fraccionaria
+
+    # Convertir a binario
+    li $t3, 0               # Inicializar el exponente
+    li $t4, 0               # Inicializar la mantisa
+
+normalize_loop:
+    beq $t0, 0, end_normalize  # Si el número es 0, terminar
+    srl $t0, $t0, 1           # Desplazar a la derecha
+    addi $t3, $t3, 1          # Incrementar el exponente
+    j normalize_loop
+
+end_normalize:
+    # Calcular el exponente con sesgo
+    addi $t3, $t3, 127        # Añadir el sesgo de 127
+    sb $t3, exponent          # Guardar el exponente
+
+    # Calcular la mantisa
+    sll $t4, $t0, 23          # Desplazar la mantisa a la posición correcta
+    sw $t4, mantissa          # Guardar la mantisa
+
+    jr $ra
+    
+display_representation:
+    # Mostrar el número normalizado
+    li $v0, 4
+    la $a0, normalized_msg
+    syscall
+
+    # Mostrar el signo
+    li $v0, 4
+    la $a0, sign_msg
+    syscall
+    lb $a0, sign
+    li $v0, 1
+    syscall
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # Mostrar el exponente
+    li $v0, 4
+    la $a0, exponent_msg
+    syscall
+    lb $a0, exponent
+    li $v0, 1
+    syscall
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # Mostrar la mantisa
+    li $v0, 4
+    la $a0, mantissa_msg
+    syscall
+    lw $a0, mantissa
+    li $v0, 35  # Mostrar en binario
+    syscall
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    jr $ra
