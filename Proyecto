@@ -3,6 +3,13 @@
     error_message: .asciiz "Entrada no valida\n"
     input_buffer: .space 256
     output_buffer: .space 34 # 1 + 8 + 23 + 2 espacios + null
+    invalid_input: .asciiz "Entrada invalida\n"
+    float_zero: .float 0.0
+    float_one: .float 1.0
+    float_two: .float 2.0
+    formatted_output: .space 34 # Búfer para la salida formateada
+    space: .asciiz " "
+    newline: .asciiz "\n"
 .text
     .globl main
 main:
@@ -19,9 +26,9 @@ input_loop:
     li $a1, 256
     syscall
 
-    # Filtrar la entrada (implementacion simplificada)
+    # Filtrar la entrada
     jal filter_input
-    beqz $v0, input_loop # Si la entrada no es valida, repetir
+    beqz $v0, invalid_input_handler # Si la entrada no es válida, manejar el error
 
     # Convertir a binario
     la $a0, input_buffer
@@ -39,35 +46,266 @@ input_loop:
 
     # Mostrar la salida (syscall 4)
     li $v0, 4
-    la $a0, output_buffer
+    la $a0, formatted_output
     syscall
 
     # Terminar el programa
     li $v0, 10
     syscall
 
-# Funciones (implementacion parcial)
+invalid_input_handler:
+    # Mostrar mensaje de error
+    li $v0, 4
+    la $a0, invalid_input
+    syscall
+    j input_loop # Volver al bucle principal
+
 filter_input:
-    # Implementar la logica de filtrado aqui
-    # ...
-    # Si la entrada es valida, poner 1 en $v0, si no, poner 0
-    li $v0, 1
-    jr $ra
+    # Filtra entradas decimales o hexadecimales simples
+    li $v0, 1              # Asumir entrada válida inicialmente
+    li $t0, 0              # Contador de caracteres
+    la $t1, input_buffer   # Puntero a la entrada
+    li $t2, 0              # Bandera: 1 si es hexadecimal, 0 si es decimal
+    li $t3, 0              # Bandera: 1 si es negativo
+    li $t5, 0              # Contador de caracteres para evitar bucle infinito
+    li $t6, 255            # Tamaño máximo del buffer
+    lb $t4, 0($t1)         # Cargar el primer carácter
+
+    # Verifica si la cadena de entrada está vacía
+    beqz $t4, invalid_input
+
+    # Manejar signo negativo opcional
+    beq $t4, '-', negative
+
+check_char:
+    beq $t4, '\n', return_filter   # Fin de la cadena (carácter de nueva línea)
+    bge $t5, $t6, invalid     # Si se supera el tamaño máximo del buffer, inválido
+    # Verificar si es hexadecimal o decimal
+    blt $t4, '0', invalid     # Si es menor que '0', inválido
+    ble $t4, '9', decimal_char # Si está entre '0' y '9', es decimal
+    blt $t4, 'A', invalid     # Si es menor que 'A', inválido
+    ble $t4, 'F', hex_char    # Si está entre 'A' y 'F', es hexadecimal
+    blt $t4, 'a', invalid     # Si es menor que 'a', inválido
+    ble $t4, 'f', hex_char    # Si está entre 'a' y 'f', es hexadecimal
+    j invalid                 # Cualquier otro caso, inválido
+
+invalid:
+    li $v0, 0                 # Entrada inválida
+    j return_filter
+
+decimal_char:
+    # Si es decimal, avanzamos al siguiente carácter
+    j next_char
+
+hex_char:
+    li $t2, 1                 # Establecer bandera hexadecimal
+    j next_char
+
+next_char:
+    addi $t0, $t0, 1          # Incrementar contador de caracteres
+    addi $t1, $t1, 1          # Mover al siguiente carácter en el buffer
+    lb $t4, 0($t1)            # Cargar el siguiente carácter
+    addi $t5, $t5, 1          # Incrementar contador de caracteres procesados
+    j check_char              # Volver a verificar el carácter
+
+negative:
+    li $t3, 1                 # Establecer bandera de negativo
+    addi $t1, $t1, 1          # Mover al siguiente carácter en el buffer
+    lb $t4, 0($t1)            # Cargar el siguiente carácter
+    addi $t5, $t5, 1          # Incrementar contador de caracteres procesados
+    # Verifica que haya un carácter válido después del signo negativo
+    beqz $t4, invalid         # Si no hay más caracteres, inválido
+    blt $t4, '0', invalid     # Si es menor que '0', inválido
+    ble $t4, '9', check_char  # Si está entre '0' y '9', es válido
+    blt $t4, 'A', invalid     # Si es menor que 'A', inválido
+    ble $t4, 'F', check_char  # Si está entre 'A' y 'F', es válido
+    blt $t4, 'a', invalid     # Si es menor que 'a', inválido
+    ble $t4, 'f', check_char  # Si está entre 'a' y 'f', es válido
+    j invalid                 # Cualquier otro caso, inválido
+
+return_filter:
+    jr $ra                    # Retornar al llamador
 
 convert_to_binary:
-    # Implementar la logica de conversion a binario aqui
-    # ...
-    # Poner el valor binario en $v0
-    li $v0, 10 # Ejemplo
+    # Convierte una cadena decimal o hexadecimal a entero
+    li $v0, 0      # Resultado
+    li $t0, 10     # Base decimal
+    la $t1, input_buffer # Puntero a la entrada
+    li $t2, 0      # Bandera: 1 si es hexadecimal
+    li $t3, 0      # Bandera: 1 si es negativo
+    lb $t4, ($t1)   # Cargar el primer carácter
+
+    beq $t4, '-', negative_convert
+    j convert_loop
+
+negative_convert:
+    li $t3, 1
+    addi $t1, $t1, 1
+    lb $t4, ($t1)
+
+convert_loop:
+    beqz $t4, end_convert
+    blt $t4, '0', end_convert
+    ble $t4, '9', decimal_convert
+    blt $t4, 'A', end_convert
+    ble $t4, 'F', hex_convert
+    blt $t4, 'a', end_convert
+    ble $t4, 'f', hex_convert
+    j end_convert
+
+decimal_convert:
+    mult $v0, $t0
+    mflo $v0
+    sub $t4, $t4, '0'
+    add $v0, $v0, $t4
+    addi $t1, $t1, 1
+    lb $t4, ($t1)
+    j convert_loop
+
+hex_convert:
+    li $t2, 1 # Establecer bandera hexadecimal
+    sll $v0, $v0, 4 # Multiplicar por 16
+    blt $t4, 'A', hex_digit
+    sub $t4, $t4, 'A'
+    addi $t4, $t4, 10
+    j hex_add
+hex_digit:
+    sub $t4, $t4, '0'
+hex_add:
+    add $v0, $v0, $t4
+    addi $t1, $t1, 1
+    lb $t4, ($t1)
+    j convert_loop
+
+end_convert:
+    beqz $t3, return_convert
+    neg $v0, $v0
+return_convert:
     jr $ra
 
 float_to_ieee754:
-    # Implementar la logica de conversion a punto flotante aqui
-    # ...
-    # Poner la representacion IEEE 754 en output_buffer
+    # Convierte un punto flotante a IEEE 754 binario
+    # (Implementación simplificada)
+    mov.s $f0, $f12       # Copiar el valor a $f0
+    l.s $f1, float_zero   # Cargar 0.0 en $f1
+    c.lt.s $f0, $f1       # Comparar si $f0 < 0.0
+    bc1t sign_is_negative_float # Si es negativo, saltar a sign_is_negative_float
+    li $t0, 0            # Signo positivo (0)
+    j extract_exponent_float
+
+sign_is_negative_float:
+    li $t0, 1            # Signo negativo (1)
+    neg.s $f12, $f12      # Negar el valor absoluto para normalizar
+
+extract_exponent_float:
+    l.s $f1, float_two    # Cargar 2.0 en $f1
+    li $t1, 0            # Inicializar el exponente
+loop_normalize_float:
+    mov.s $f0, $f12       # Copiar el valor a $f0
+    l.s $f2, float_one    # Cargar 1.0 en $f2
+    c.lt.s $f0, $f2       # Comparar si $f0 < 1.0
+    bc1t normalize_divide_float # Si $f0 < 1.0, dividir por 2
+    div.s $f12, $f12, $f1 # Dividir $f12 por 2.0
+    addi $t1, $t1, 1      # Incrementar el exponente
+    j loop_normalize_float
+
+normalize_divide_float:
+    mul.s $f12, $f12, $f1 # Multiplicar $f12 por 2.0
+    subi $t1, $t1, 1      # Decrementar el exponente
+    addi $t1, $t1, 127    # Ajustar el exponente con el sesgo
+
+extract_mantissa_float:
+    li $t2, 23           # Inicializar el contador de mantisa
+    li $t3, 0            # Inicializar la mantisa
+loop_mantissa_float:
+    beqz $t2, store_ieee754_float # Si la mantisa está completa, almacenar
+    mul.s $f12, $f12, $f1 # Multiplicar $f12 por 2.0
+    mfc1 $t4, $f12        # Mover la parte entera de $f12 a $t4
+    andi $t4, $t4, 1      # Aislar el bit menos significativo
+    sllv $t4, $t4, $t2    # Desplazar el bit a la posición correcta
+    or $t3, $t3, $t4      # Combinar el bit con la mantisa
+    subi $t2, $t2, 1      # Decrementar el contador de mantisa
+    mtc1 $t4, $f4        # Mover la parte entera de $f12 a $f4
+    cvt.s.w $f4, $f4      # Convertir a punto flotante
+    sub.s $f12, $f12, $f4 # Restar la parte entera de $f12
+    j loop_mantissa_float
+
+store_ieee754_float:
+    sll $t0, $t0, 31      # Desplazar el signo a la posición correcta
+    sll $t1, $t1, 23      # Desplazar el exponente a la posición correcta
+    or $t0, $t0, $t1      # Combinar el signo y el exponente
+    or $t0, $t0, $t3      # Combinar con la mantisa
+    move $t5, $a0        # Puntero al búfer de salida
+    li $t6, 0            # Contador de caracteres
+store_loop:
+    beqz $t6, end_store   # Si se han almacenado todos los caracteres, terminar
+    andi $t7, $t0, 0x80000000 # Aislar el bit más significativo
+    bnez $t7, sign_negative_str # Si el bit es 1, almacenar '1'
+    li $t7, '0'          # Si el bit es 0, almacenar '0'
+    j store_char_str
+
+sign_negative_str:
+    li $t7, '1'          # Almacenar '1'
+
+store_char_str:
+    sb $t7, ($t5)        # Almacenar el carácter en el búfer
+    addi $t5, $t5, 1      # Incrementar el puntero del búfer
+    sll $t0, $t0, 1      # Desplazar el valor a la izquierda
+    addi $t6, $t6, 1      # Incrementar el contador de caracteres
+    j store_loop
+
+end_store:
     jr $ra
 
 format_output:
-    # Implementar el formateo de la salida aqui
-    # ...
+    la $t0, output_buffer    # Puntero al búfer de entrada
+    la $t1, formatted_output # Puntero al búfer de salida
+    li $t2, 0                # Contador de caracteres
+
+# Copiar el signo
+    lb $t3, ($t0)
+    sb $t3, ($t1)
+    addi $t1, $t1, 1         # Avanzar al siguiente espacio de memoria
+
+# Agregar un espacio
+    li $t3, ' '              # Cargar el carácter de espacio
+    sb $t3, ($t1)
+    addi $t1, $t1, 1         # Avanzar al siguiente espacio de memoria
+
+    addi $t0, $t0, 1         # Avanzar al siguiente carácter en el búfer de entrada
+
+# Copiar el exponente
+exponent_loop:
+    lb $t3, ($t0)
+    sb $t3, ($t1)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    addi $t2, $t2, 1
+    blt $t2, 8, exponent_loop
+
+# Agregar un espacio
+    li $t3, ' '              # Cargar el carácter de espacio
+    sb $t3, ($t1)
+    addi $t1, $t1, 1         # Avanzar al siguiente espacio de memoria
+
+    li $t2, 0                # Reiniciar el contador de caracteres
+
+# Copiar la mantisa
+mantissa_loop:
+    lb $t3, ($t0)
+    sb $t3, ($t1)
+    addi $t0, $t0, 1
+    addi $t1, $t1, 1
+    addi $t2, $t2, 1
+    blt $t2, 23, mantissa_loop
+
+# Agregar un salto de línea
+    li $t3, '\n'             # Cargar el carácter de nueva línea
+    sb $t3, ($t1)
+    addi $t1, $t1, 1         # Avanzar al siguiente espacio de memoria
+
+# Terminar la cadena con un carácter nulo
+    li $t3, 0                # Cargar el carácter nulo
+    sb $t3, ($t1)
+
     jr $ra
