@@ -1,0 +1,228 @@
+.data
+    prompt:         .asciiz "Introduce un numero en formato decimal o hexadecimal: "
+    invalid_input:  .asciiz "Entrada no válida.\n"
+    normalized_msg: .asciiz "Número normalizado: "
+    sign_msg:       .asciiz "Signo: "
+    exponent_msg:   .asciiz "Exponente: "
+    mantissa_msg:   .asciiz "Mantisa: "
+    newline:        .asciiz "\n"
+    buffer:         .space 32
+    sign:           .byte 0
+    exponent:       .byte 0
+    mantissa:       .word 0
+
+.text
+.globl main
+
+main:
+    # Mostrar el mensaje de bienvenida
+    li $v0, 4
+    la $a0, prompt
+    syscall
+
+    # Leer la entrada del usuario
+    li $v0, 8
+    la $a0, buffer
+    li $a1, 32
+    syscall
+
+    # Procesar la entrada
+    jal process_input
+
+    # Verificar si la entrada es válida
+    beq $v0, $zero, invalid_input_error
+
+    # Normalizar el número
+    jal normalize_number
+
+    # Mostrar la representación final
+    jal display_representation
+
+    # Salir del programa
+    li $v0, 10
+    syscall
+
+invalid_input_error:
+    # Mostrar mensaje de error
+    li $v0, 4
+    la $a0, invalid_input
+    syscall
+
+    # Salir del programa
+    li $v0, 10
+    syscall
+
+process_input:
+    # Inicializar registros
+    la $t0, buffer          # Cargar la dirección del búfer
+    li $t1, 0               # Inicializar el signo (0 = positivo, 1 = negativo)
+    li $t2, 0               # Inicializar la parte entera
+    li $t3, 0               # Inicializar la parte fraccionaria
+    li $t4, 10              # Base decimal
+    li $t5, 0               # Contador de dígitos fraccionarios
+    li $t8, 0               # Bandera para indicar si se encontró un punto decimal
+
+    # Leer el primer carácter
+    lb $t6, 0($t0)
+    beq $t6, '+', positive  # Si es '+', es positivo
+    beq $t6, '-', negative  # Si es '-', es negativo
+    j check_digit           # Si no hay signo, verificar si es un dígito
+
+positive:
+    addi $t0, $t0, 1        # Saltar el signo '+'
+    j check_digit
+
+negative:
+    li $t1, 1               # Establecer el signo como negativo
+    addi $t0, $t0, 1        # Saltar el signo '-'
+
+check_digit:
+    lb $t6, 0($t0)
+    beq $t6, '.', found_dot  # Si encuentra '.', procesar la parte fraccionaria
+    beq $t6, 0, end_process  # Si es el final de la cadena, terminar
+    beq $t6, 10, end_process # Si es un salto de línea, terminar
+    blt $t6, '0', invalid_input_error  # Si no es un dígito, error
+    bgt $t6, '9', invalid_input_error
+
+    # Convertir dígito a valor y acumular
+    mul $t2, $t2, $t4       # Multiplicar la parte entera por 10
+    sub $t7, $t6, '0'       # Convertir dígito a valor
+    add $t2, $t2, $t7       # Acumular en la parte entera
+    addi $t0, $t0, 1        # Mover al siguiente carácter
+    j check_digit
+
+found_dot:
+    addi $t0, $t0, 1        # Saltar el punto '.'
+    li $t8, 1               # Indicar que se encontró un punto decimal
+
+process_fraction_loop:
+    lb $t6, 0($t0)
+    beq $t6, 0, end_process  # Si es el final de la cadena, terminar
+    beq $t6, 10, end_process # Si es un salto de línea, terminar
+    blt $t6, '0', invalid_input_error  # Si no es un dígito, error
+    bgt $t6, '9', invalid_input_error
+
+    # Convertir dígito a valor y acumular
+    mul $t3, $t3, $t4       # Multiplicar la parte fraccionaria por 10
+    sub $t7, $t6, '0'       # Convertir dígito a valor
+    add $t3, $t3, $t7       # Acumular en la parte fraccionaria
+    addi $t5, $t5, 1        # Incrementar el contador de dígitos fraccionarios
+    addi $t0, $t0, 1        # Mover al siguiente carácter
+    j process_fraction_loop
+
+end_process:
+    # Guardar el signo, parte entera y fraccionaria
+    sb $t1, sign
+    sw $t2, mantissa        # Usar mantissa como almacenamiento temporal
+    sw $t3, mantissa + 4    # Guardar la parte fraccionaria
+
+    # Retornar éxito
+    li $v0, 1
+    jr $ra
+
+normalize_number:
+    # Cargar la parte entera
+    lw $t0, mantissa        # Parte entera
+
+    # Verificar si el número es cero
+    beqz $t0, end_normalize  # Si el número es 0, terminar
+
+    # Determinar el signo
+    bgtz $t0, normalize_positive  # Si el número es positivo, normalizar
+    neg $t0, $t0             # Si el número es negativo, convertirlo a positivo
+    li $t1, 1                # Establecer el signo como negativo
+    sb $t1, sign
+
+normalize_positive:
+    # Encontrar el bit más significativo (MSB)
+    clz $t3, $t0             # Contar los ceros a la izquierda
+    li $t5, 31               # Número total de bits - 1
+    sub $t3, $t5, $t3        # Calcular la posición del MSB
+    addi $t3, $t3, 127       # Añadir el sesgo de 127
+    sb $t3, exponent         # Guardar el exponente
+
+    # Normalizar la mantisa
+    sllv $t4, $t0, $t3       # Desplazar el número para que el MSB esté en la posición 23
+    li $t6, 0x007FFFFF       # Máscara para obtener los 23 bits de la mantisa
+    and $t4, $t4, $t6        # Aplicar la máscara para obtener la mantisa
+
+    # Guardar la mantisa
+    sw $t4, mantissa         # Guardar la mantisa
+
+end_normalize:
+    jr $ra
+
+display_representation:
+    # Mostrar el signo
+    li $v0, 4
+    la $a0, sign_msg
+    syscall
+    lb $a0, sign
+    li $v0, 1
+    syscall
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # Mostrar el exponente en binario
+    li $v0, 4
+    la $a0, exponent_msg
+    syscall
+    lb $t0, exponent          # Cargar el exponente (en decimal)
+    li $t1, 8                 # Contador de bits (8 bits para el exponente)
+    li $t2, 0x80              # Máscara para extraer el bit más significativo (10000000 en binario)
+
+display_exponent_loop:
+    and $t3, $t0, $t2         # Aplicar la máscara para extraer el bit actual
+    beqz $t3, display_zero    # Si el bit es 0, mostrar '0'
+    li $a0, '1'               # Si el bit es 1, mostrar '1'
+    j display_bit
+
+display_zero:
+    li $a0, '0'               # Mostrar '0'
+
+display_bit:
+    li $v0, 11                # Llamada al sistema para mostrar un carácter
+    syscall
+    srl $t2, $t2, 1           # Desplazar la máscara a la derecha
+    addi $t1, $t1, -1         # Decrementar el contador de bits
+    bnez $t1, display_exponent_loop  # Repetir hasta que se muestren los 8 bits
+
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    # Mostrar la mantisa en binario (empezando desde el primer '1')
+    li $v0, 4
+    la $a0, mantissa_msg
+    syscall
+    lw $t0, mantissa          # Cargar la mantisa
+    clz $t1, $t0              # Contar los ceros a la izquierda
+    li $t2, 31                # Número total de bits - 1
+    sub $t1, $t2, $t1         # Calcular la posición del primer '1'
+    sllv $t0, $t0, $t1        # Desplazar la mantisa para que el primer '1' sea el bit más significativo
+
+    li $t2, 0x80000000        # Máscara para extraer el bit más significativo (10000000... en binario)
+    li $t3, 23                # Contador de bits (23 bits para la mantisa)
+
+display_mantissa_loop:
+    and $t4, $t0, $t2         # Aplicar la máscara para extraer el bit actual
+    beqz $t4, display_zero_mantissa  # Si el bit es 0, mostrar '0'
+    li $a0, '1'               # Si el bit es 1, mostrar '1'
+    j display_bit_mantissa
+
+display_zero_mantissa:
+    li $a0, '0'               # Mostrar '0'
+
+display_bit_mantissa:
+    li $v0, 11                # Llamada al sistema para mostrar un carácter
+    syscall
+    srl $t2, $t2, 1           # Desplazar la máscara a la derecha
+    addi $t3, $t3, -1         # Decrementar el contador de bits
+    bnez $t3, display_mantissa_loop  # Repetir hasta que se muestren los 23 bits
+
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    jr $ra
