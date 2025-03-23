@@ -217,8 +217,9 @@ normalize_positive:
     li $t6, 0x007FFFFF       # Máscara para obtener los 23 bits de la mantisa
     and $t4, $t4, $t6        # Aplicar la máscara para obtener la mantisa
 
-    # Añadir el bit implícito (1) a la mantisa
-    ori $t4, $t4, 0x00800000 # Añadir el bit implícito
+    # Eliminar el bit implícito (el bit más significativo)
+    sll $t4, $t4, 1          # Desplazar la mantisa un bit a la izquierda para eliminar el bit implícito
+    srl $t4, $t4, 1          # Desplazar la mantisa un bit a la derecha para reajustar
 
     # Guardar la mantisa
     sw $t4, mantissa         # Guardar la mantisa
@@ -265,24 +266,13 @@ display_bit:
     la $a0, newline
     syscall
 
-    # Mostrar la mantisa en binario (primero los bits activos, luego completar con ceros)
+    # Mostrar la mantisa en binario (23 bits)
     li $v0, 4
     la $a0, mantissa_msg
     syscall
     lw $t0, mantissa          # Cargar la mantisa
     li $t1, 23                # Contador de bits (23 bits para la mantisa)
     li $t2, 0x00400000        # Máscara para extraer el bit más significativo (bit 22)
-
-    # Encontrar el primer bit activo (omitir ceros a la izquierda)
-find_first_bit:
-    and $t3, $t0, $t2         # Aplicar la máscara para extraer el bit actual
-    bnez $t3, display_mantissa_loop  # Si el bit es 1, empezar a mostrar
-    srl $t2, $t2, 1           # Desplazar la máscara a la derecha
-    addi $t1, $t1, -1         # Decrementar el contador de bits
-    bnez $t1, find_first_bit  # Repetir hasta encontrar el primer bit activo
-
-    # Si no se encontró ningún bit activo, mostrar 23 ceros
-    beqz $t1, display_all_zeros
 
 display_mantissa_loop:
     and $t3, $t0, $t2         # Aplicar la máscara para extraer el bit actual
@@ -298,13 +288,13 @@ display_bit_mantissa:
     syscall
     srl $t2, $t2, 1           # Desplazar la máscara a la derecha
     addi $t1, $t1, -1         # Decrementar el contador de bits
-    bnez $t1, display_mantissa_loop  # Repetir hasta que se muestren los bits activos
+    bnez $t1, display_mantissa_loop  # Repetir hasta que se muestren los 23 bits
 
-    # Completar con ceros a la derecha hasta llegar a 23 bits
-    # Calcular cuántos ceros faltan para completar 23 bits
-    li $t4, 23                # Total de bits de la mantisa
-    sub $t5, $t4, $t1         # Calcular cuántos ceros faltan
-    beqz $t5, end_mantissa    # Si no faltan ceros, terminar
+    li $v0, 4
+    la $a0, newline
+    syscall
+
+    jr $ra
 
 complete_zeros:
     li $a0, '0'               # Mostrar '0'
