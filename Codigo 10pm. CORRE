@@ -206,16 +206,6 @@ normalize_number:
     sb $t2, sign
 
 normalize_positive:
-    # Combinar parte entera y fraccionaria
-    # Convertir la parte fraccionaria a binario (asumiendo que es un número de 2 dígitos decimales)
-    li $t4, 100              # Factor para convertir la parte fraccionaria a binario
-    div $t1, $t4             # Dividir la parte fraccionaria por 100
-    mflo $t1                 # Obtener el cociente (parte fraccionaria en binario)
-
-    # Combinar parte entera y fraccionaria
-    sll $t0, $t0, 8          # Desplazar la parte entera 8 bits a la izquierda
-    or $t0, $t0, $t1         # Combinar con la parte fraccionaria
-
     # Encontrar el bit más significativo (MSB)
     clz $t3, $t0             # Contar los ceros a la izquierda
     li $t5, 31               # Número total de bits - 1
